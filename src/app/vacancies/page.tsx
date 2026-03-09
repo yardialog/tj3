@@ -17,6 +17,16 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuthStore } from '@/stores/auth-store';
+import { useToast } from '@/hooks/use-toast';
+import {
   Search,
   MapPin,
   Clock,
@@ -38,7 +48,12 @@ import {
   Users,
   Building2,
   Calendar,
-  SlidersHorizontal
+  SlidersHorizontal,
+  MessageCircle,
+  CheckCircle,
+  XCircle,
+  Eye,
+  Send
 } from 'lucide-react';
 
 interface Vacancy {
@@ -61,7 +76,10 @@ interface Vacancy {
     logoUrl: string | null;
     rating: number;
     city: string;
+    userId: string;
   };
+  applicationStatus?: string | null;
+  chatRoomId?: string | null;
 }
 
 interface Pagination {
@@ -128,6 +146,8 @@ const ageColors: Record<string, string> = {
 function VacanciesPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { isAuthenticated, user } = useAuthStore();
+  const { toast } = useToast();
 
   const [vacancies, setVacancies] = useState<Vacancy[]>([]);
   const [pagination, setPagination] = useState<Pagination>({
@@ -138,6 +158,15 @@ function VacanciesPageContent() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
+  
+  // Apply dialog state
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  const [selectedVacancy, setSelectedVacancy] = useState<Vacancy | null>(null);
+  const [applyMessage, setApplyMessage] = useState('');
+  const [isApplying, setIsApplying] = useState(false);
+  
+  // Viewed vacancies (localStorage)
+  const [viewedVacancies, setViewedVacancies] = useState<Set<string>>(new Set());
 
   // Filters
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
@@ -145,6 +174,18 @@ function VacanciesPageContent() {
   const [selectedCity, setSelectedCity] = useState<string>(searchParams.get('city') || 'all');
   const [selectedAge, setSelectedAge] = useState<string>(searchParams.get('ageRequirement') || 'all');
   const [selectedSchedule, setSelectedSchedule] = useState<string>(searchParams.get('schedule') || 'all');
+
+  // Load viewed vacancies from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('viewedVacancies');
+      if (stored) {
+        setViewedVacancies(new Set(JSON.parse(stored)));
+      }
+    } catch (e) {
+      console.error('Error loading viewed vacancies:', e);
+    }
+  }, []);
 
   // Fetch on mount and when filters change
   useEffect(() => {
@@ -174,6 +215,91 @@ function VacanciesPageContent() {
       console.error('Error fetching vacancies:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+  
+  const handleOpenApplyDialog = (vacancy: Vacancy) => {
+    if (!isAuthenticated) {
+      router.push('/login?redirect=/vacancies');
+      return;
+    }
+    if (user?.role !== 'TEENAGER') {
+      toast({
+        title: 'Ошибка',
+        description: 'Откликаться на вакансии могут только подростки',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setSelectedVacancy(vacancy);
+    setApplyMessage('');
+    setApplyDialogOpen(true);
+  };
+  
+  const handleApply = async () => {
+    if (!selectedVacancy) return;
+    
+    setIsApplying(true);
+    try {
+      const response = await fetch('/api/applications/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vacancyId: selectedVacancy.id,
+          message: applyMessage || undefined,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        toast({
+          title: 'Успешно',
+          description: 'Отклик отправлен',
+        });
+        setApplyDialogOpen(false);
+        // Update vacancy status locally
+        setVacancies(prev => prev.map(v => 
+          v.id === selectedVacancy.id 
+            ? { ...v, applicationStatus: 'SENT' }
+            : v
+        ));
+      } else {
+        toast({
+          title: 'Ошибка',
+          description: data.error || 'Не удалось отправить отклик',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Произошла ошибка при отправке отклика',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsApplying(false);
+    }
+  };
+  
+  const handleOpenChat = (vacancy: Vacancy) => {
+    if (!isAuthenticated) {
+      router.push('/login?redirect=/vacancies');
+      return;
+    }
+    router.push('/messages');
+  };
+  
+  const markAsViewed = (vacancyId: string) => {
+    if (!viewedVacancies.has(vacancyId)) {
+      const newSet = new Set(viewedVacancies);
+      newSet.add(vacancyId);
+      setViewedVacancies(newSet);
+      try {
+        localStorage.setItem('viewedVacancies', JSON.stringify([...newSet]));
+      } catch (e) {
+        console.error('Error saving viewed vacancies:', e);
+      }
     }
   };
 
@@ -411,8 +537,43 @@ function VacanciesPageContent() {
                 {vacancies.map((vacancy) => {
                   const color = getCategoryColor(vacancy.category);
                   const CategoryIcon = categoryIcons[vacancy.category] || Briefcase;
+                  const isViewed = viewedVacancies.has(vacancy.id);
+                  const applicationStatus = vacancy.applicationStatus;
+                  const hasChat = !!vacancy.chatRoomId;
+                  const isRejected = applicationStatus === 'REJECTED';
+                  const isAccepted = applicationStatus === 'ACCEPTED';
+                  const isApplied = applicationStatus === 'SENT' || applicationStatus === 'VIEWED';
+                  
                   return (
-                    <Card key={vacancy.id} className="flex flex-col border-0 shadow-sm hover:shadow-lg transition-all group">
+                    <Card key={vacancy.id} className={`flex flex-col border-0 shadow-sm hover:shadow-lg transition-all group relative ${isViewed ? 'opacity-80' : ''}`}>
+                      {/* Status badges */}
+                      <div className="absolute top-2 right-2 z-10 flex flex-col gap-1">
+                        {isViewed && !applicationStatus && (
+                          <Badge variant="outline" className="bg-slate-100 text-slate-600 text-xs">
+                            <Eye className="h-3 w-3 mr-1" />
+                            Просмотрено
+                          </Badge>
+                        )}
+                        {isRejected && (
+                          <Badge variant="destructive" className="text-xs">
+                            <XCircle className="h-3 w-3 mr-1" />
+                            Вам отказали
+                          </Badge>
+                        )}
+                        {isAccepted && (
+                          <Badge className="bg-green-500 text-white text-xs">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Принят
+                          </Badge>
+                        )}
+                        {isApplied && !isAccepted && !isRejected && (
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
+                            <Send className="h-3 w-3 mr-1" />
+                            Отклик отправлен
+                          </Badge>
+                        )}
+                      </div>
+                      
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
@@ -426,6 +587,7 @@ function VacanciesPageContent() {
                               <Link
                                 href={`/vacancy/${vacancy.slug}`}
                                 className="hover:text-primary transition-colors"
+                                onClick={() => markAsViewed(vacancy.id)}
                               >
                                 {vacancy.title}
                               </Link>
@@ -452,6 +614,65 @@ function VacanciesPageContent() {
                           </div>
                         </div>
                       </CardContent>
+                      
+                      {/* Action buttons */}
+                      <div className="px-6 pb-4 space-y-2">
+                        {user?.role === 'TEENAGER' && (
+                          <>
+                            {!applicationStatus && (
+                              <Button 
+                                className="w-full" 
+                                onClick={() => handleOpenApplyDialog(vacancy)}
+                                disabled={isRejected}
+                              >
+                                Откликнуться
+                              </Button>
+                            )}
+                            {(isApplied || isAccepted) && hasChat && (
+                              <Button 
+                                variant="outline" 
+                                className="w-full" 
+                                onClick={() => handleOpenChat(vacancy)}
+                              >
+                                <MessageCircle className="h-4 w-4 mr-2" />
+                                Написать в чат
+                              </Button>
+                            )}
+                            {isApplied && !hasChat && (
+                              <Button 
+                                variant="outline" 
+                                className="w-full" 
+                                disabled
+                              >
+                                Ожидайте ответа
+                              </Button>
+                            )}
+                            {isRejected && (
+                              <Button variant="outline" className="w-full" disabled>
+                                <XCircle className="h-4 w-4 mr-2" />
+                                Отказано
+                              </Button>
+                            )}
+                          </>
+                        )}
+                        {user?.role === 'EMPLOYER' && vacancy.employer.userId === user.id && (
+                          <Button variant="outline" className="w-full" asChild>
+                            <Link href={`/vacancies/edit/${vacancy.id}`}>
+                              Редактировать
+                            </Link>
+                          </Button>
+                        )}
+                        {(!user || user.role === 'ADMIN') && !isAuthenticated && (
+                          <Button 
+                            variant="outline" 
+                            className="w-full" 
+                            onClick={() => router.push('/login?redirect=/vacancies')}
+                          >
+                            Войти для отклика
+                          </Button>
+                        )}
+                      </div>
+                      
                       <CardFooter className="pt-0 border-t bg-muted/30">
                         <div className="flex items-center justify-between w-full pt-4">
                           <div className="flex items-center space-x-2">
@@ -600,6 +821,54 @@ function VacanciesPageContent() {
         </section>
       </main>
       <Footer />
+      
+      {/* Apply Dialog */}
+      <Dialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Откликнуться на вакансию</DialogTitle>
+            <DialogDescription>
+              {selectedVacancy && (
+                <span className="font-medium text-foreground">
+                  {selectedVacancy.title} — {selectedVacancy.employer.companyName}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Сообщение работодателю (необязательно)
+              </label>
+              <Textarea
+                value={applyMessage}
+                onChange={(e) => setApplyMessage(e.target.value)}
+                placeholder="Расскажите о себе и почему вы хотите получить эту работу..."
+                rows={4}
+                maxLength={1000}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                {applyMessage.length}/1000 символов
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setApplyDialogOpen(false)}>
+                Отмена
+              </Button>
+              <Button onClick={handleApply} disabled={isApplying}>
+                {isApplying ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Отправка...
+                  </>
+                ) : (
+                  'Отправить отклик'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
