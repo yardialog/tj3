@@ -71,13 +71,14 @@ function MessagesContent() {
   const [isConnected, setIsConnected] = useState(true); // HTTP polling is always "connected"
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastMessageIdRef = useRef<string | null>(null);
 
-  // Auto scroll to bottom
+  // Auto scroll to bottom - only scroll the messages container, not the whole page
   const scrollToBottom = useCallback(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
     }
   }, []);
 
@@ -381,7 +382,7 @@ function MessagesContent() {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4">
+              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4">
                 <div className="space-y-4">
                   {messages.map((message, index) => {
                     const isOwn = message.senderId === user.id;
