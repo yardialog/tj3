@@ -17,6 +17,7 @@ interface AuthState {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  hasInitiallyLoaded: boolean;
 
   setUser: (user: User | null) => void;
   setLoading: (loading: boolean) => void;
@@ -28,8 +29,9 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  isLoading: true,
+  isLoading: false, // Не показываем спиннер при начальной загрузке
   isAuthenticated: false,
+  hasInitiallyLoaded: false, // Флаг для отслеживания первой загрузки
 
   setUser: (user) => set({
     user,
@@ -104,7 +106,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   fetchUser: async () => {
-    set({ isLoading: true });
+    // Устанавливаем isLoading только если это не первая загрузка
+    const shouldShowLoading = get().hasInitiallyLoaded;
+    if (shouldShowLoading) {
+      set({ isLoading: true });
+    }
+    
     try {
       const response = await fetch('/api/auth/me');
 
@@ -113,7 +120,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({
           user: data.user,
           isAuthenticated: true,
-          isLoading: false
+          isLoading: false,
+          hasInitiallyLoaded: true
         });
       } else {
         // Try to refresh token
@@ -129,7 +137,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             set({
               user: data.user,
               isAuthenticated: true,
-              isLoading: false
+              isLoading: false,
+              hasInitiallyLoaded: true
             });
             return;
           }
@@ -138,7 +147,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({
           user: null,
           isAuthenticated: false,
-          isLoading: false
+          isLoading: false,
+          hasInitiallyLoaded: true
         });
       }
     } catch (error) {
@@ -146,7 +156,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({
         user: null,
         isAuthenticated: false,
-        isLoading: false
+        isLoading: false,
+        hasInitiallyLoaded: true
       });
     }
   },
