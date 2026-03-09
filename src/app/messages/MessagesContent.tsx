@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -13,11 +13,11 @@ import {
   User,
   Building2,
   Briefcase,
-  Circle,
-  CheckCheck
+  CheckCheck,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth-store';
-import { io, Socket } from 'socket.io-client';
 
 interface Message {
   id: string;
@@ -43,8 +43,8 @@ interface ChatRoom {
   };
   messages: Message[];
   employer?: {
-    userId: string;
     companyName: string;
+    userId: string;
   };
   teenager?: {
     id: string;
@@ -60,7 +60,7 @@ function MessagesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isLoading: authLoading } = useAuthStore();
-  
+
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null);
   const [otherUser, setOtherUser] = useState<{ id: string; name: string; type: string } | null>(null);
@@ -68,18 +68,11 @@ function MessagesContent() {
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const selectedRoomRef = useRef<ChatRoom | null>(null);
+  const [isConnected, setIsConnected] = useState(true); // HTTP polling is always "connected"
 
-  // Keep selectedRoomRef in sync
-  useEffect(() => {
-    selectedRoomRef.current = selectedRoom;
-  }, [selectedRoom]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
 
   // Auto scroll to bottom
   const scrollToBottom = useCallback(() => {
@@ -103,66 +96,37 @@ function MessagesContent() {
     }
   }, []);
 
-  // Initialize socket only once
-  useEffect(() => {
-    if (user) {
-      // Determine socket URL based on environment
-      const isDev = window.location.hostname === 'localhost' && window.location.port === '3000';
-      
-      if (isDev) {
-        // Sandbox environment - use XTransformPort
-        socketRef.current = io('/?XTransformPort=3003', {
-          auth: { userId: user.id },
-          transports: ['websocket', 'polling'],
-        });
-      } else {
-        // Production - use standard socket.io path
-        socketRef.current = io({
-          path: '/socket.io',
-          auth: { userId: user.id },
-          transports: ['websocket', 'polling'],
-        });
-      }
+  // Poll for new messages
+  const pollMessages = useCallback(async () => {
+    if (!selectedRoom) return;
 
-      socketRef.current.on('connect', () => {
-        console.log('Connected to chat server');
+    try {
+      const params = new URLSearchParams({
+        roomId: selectedRoom.id,
+        ...(lastMessageIdRef.current ? { afterId: lastMessageIdRef.current } : {}),
       });
 
-      socketRef.current.on('receive_message', (message: Message) => {
-        console.log('Received message:', message, 'Current room:', selectedRoomRef.current?.id);
-        if (selectedRoomRef.current?.id === message.roomId) {
+      const res = await fetch(`/api/chat/messages?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.messages?.length > 0) {
           setMessages(prev => {
-            // Avoid duplicates
-            if (prev.some(m => m.id === message.id)) {
-              return prev;
+            const existingIds = new Set(prev.map(m => m.id));
+            const newMessages = data.messages.filter((m: Message) => !existingIds.has(m.id));
+            if (newMessages.length > 0) {
+              lastMessageIdRef.current = newMessages[newMessages.length - 1].id;
             }
-            return [...prev, message];
+            return [...prev, ...newMessages];
           });
-          // Scroll to bottom when receiving a new message
-          setTimeout(() => {
-            if (messagesEndRef.current) {
-              messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-            }
-          }, 100);
+          setTimeout(scrollToBottom, 100);
         }
-        fetchRooms();
-      });
-
-      socketRef.current.on('user_typing', (data: { userId: string; isTyping: boolean }) => {
-        if (data.userId !== user.id) {
-          setIsTyping(data.isTyping);
-        }
-      });
-
-      socketRef.current.on('messages_read', () => {
-        setMessages(prev => prev.map(m => ({ ...m, isRead: true })));
-      });
-
-      return () => {
-        socketRef.current?.disconnect();
-      };
+        setIsConnected(true);
+      }
+    } catch (error) {
+      console.error('Error polling messages:', error);
+      setIsConnected(false);
     }
-  }, [user, fetchRooms]);
+  }, [selectedRoom, scrollToBottom]);
 
   // Auth check
   useEffect(() => {
@@ -186,22 +150,30 @@ function MessagesContent() {
     }
   }, [searchParams, rooms]);
 
-  // Scroll to bottom when room is first opened
+  // Start polling when room is selected
   useEffect(() => {
-    if (selectedRoom?.id) {
-      setShouldScrollToBottom(true);
+    if (selectedRoom) {
+      // Initial load
+      pollMessages();
+
+      // Poll every 2 seconds
+      pollingIntervalRef.current = setInterval(pollMessages, 2000);
     }
-  }, [selectedRoom?.id]);
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [selectedRoom, pollMessages]);
 
   // Scroll when messages are loaded
   useEffect(() => {
-    if (messages.length > 0 && shouldScrollToBottom) {
-      setTimeout(() => {
-        scrollToBottom();
-        setShouldScrollToBottom(false);
-      }, 100);
+    if (messages.length > 0) {
+      lastMessageIdRef.current = messages[messages.length - 1].id;
+      setTimeout(scrollToBottom, 100);
     }
-  }, [messages.length, shouldScrollToBottom, scrollToBottom]);
+  }, [messages.length, scrollToBottom]);
 
   const handleSelectRoom = async (roomId: string) => {
     try {
@@ -211,8 +183,9 @@ function MessagesContent() {
         setSelectedRoom(data.room);
         setOtherUser(data.otherUser);
         setMessages(data.room.messages || []);
-        
-        socketRef.current?.emit('join_room', { roomId });
+        if (data.room.messages?.length > 0) {
+          lastMessageIdRef.current = data.room.messages[data.room.messages.length - 1].id;
+        }
         router.push(`/messages?room=${roomId}`);
       }
     } catch (error) {
@@ -228,38 +201,32 @@ function MessagesContent() {
     const content = newMessage.trim();
     setNewMessage('');
 
-    socketRef.current?.emit('send_message', {
-      roomId: selectedRoom.id,
-      content,
-      receiverId: otherUser.id,
-    });
-
-    socketRef.current?.emit('typing', {
-      roomId: selectedRoom.id,
-      isTyping: false,
-    });
-
-    setIsSending(false);
-  };
-
-  const handleTyping = () => {
-    if (!selectedRoom) return;
-    
-    socketRef.current?.emit('typing', {
-      roomId: selectedRoom.id,
-      isTyping: true,
-    });
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    typingTimeoutRef.current = setTimeout(() => {
-      socketRef.current?.emit('typing', {
-        roomId: selectedRoom.id,
-        isTyping: false,
+    try {
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId: selectedRoom.id,
+          content,
+          receiverId: otherUser.id,
+        }),
       });
-    }, 2000);
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(prev => [...prev, data.message]);
+        lastMessageIdRef.current = data.message.id;
+        setTimeout(scrollToBottom, 100);
+        fetchRooms(); // Update room list
+      } else {
+        const error = await res.json();
+        console.error('Send error:', error);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const formatTime = (dateString: string) => {
@@ -297,11 +264,16 @@ function MessagesContent() {
       <div className="flex h-full">
         {/* Rooms List */}
         <div className={`w-full md:w-80 border-r flex flex-col ${selectedRoom ? 'hidden md:flex' : 'flex'}`}>
-          <div className="p-4 border-b">
+          <div className="p-4 border-b flex items-center justify-between">
             <h2 className="font-semibold flex items-center gap-2">
               <MessageSquare className="h-5 w-5" />
               Сообщения
             </h2>
+            {isConnected ? (
+              <Wifi className="h-4 w-4 text-green-500" title="Подключено" />
+            ) : (
+              <WifiOff className="h-4 w-4 text-red-500" title="Нет подключения" />
+            )}
           </div>
           <div className="flex-1 overflow-y-auto">
             {rooms.length === 0 ? (
@@ -319,7 +291,7 @@ function MessagesContent() {
                     : room.teenager?.teenager
                       ? `${room.teenager.teenager.firstName} ${room.teenager.teenager.lastName}`
                       : room.teenager?.email;
-                  
+
                   return (
                     <button
                       key={room.id}
@@ -366,6 +338,11 @@ function MessagesContent() {
 
         {/* Chat Area */}
         <div className={`flex-1 flex flex-col ${selectedRoom ? 'flex' : 'hidden md:flex'}`}>
+          {!isConnected && (
+            <div className="bg-yellow-100 text-yellow-800 px-4 py-2 text-sm text-center">
+              Переподключение...
+            </div>
+          )}
           {selectedRoom && otherUser ? (
             <>
               {/* Chat Header */}
@@ -395,10 +372,10 @@ function MessagesContent() {
                     {selectedRoom.application.vacancy.title}
                   </div>
                 </div>
-                {isTyping && (
-                  <div className="text-sm text-muted-foreground flex items-center gap-1">
-                    <Circle className="h-2 w-2 fill-current animate-pulse" />
-                    Печатает...
+                {isConnected && (
+                  <div className="flex items-center gap-1 text-xs text-green-600">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    онлайн
                   </div>
                 )}
               </div>
@@ -408,9 +385,9 @@ function MessagesContent() {
                 <div className="space-y-4">
                   {messages.map((message, index) => {
                     const isOwn = message.senderId === user.id;
-                    const showDate = index === 0 || 
+                    const showDate = index === 0 ||
                       formatDate(messages[index - 1].createdAt) !== formatDate(message.createdAt);
-                    
+
                     return (
                       <div key={message.id}>
                         {showDate && (
@@ -420,8 +397,8 @@ function MessagesContent() {
                         )}
                         <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
                           <div className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                            isOwn 
-                              ? 'bg-primary text-primary-foreground' 
+                            isOwn
+                              ? 'bg-primary text-primary-foreground'
                               : 'bg-muted'
                           }`}>
                             <p className="text-sm whitespace-pre-wrap">{message.content}</p>
@@ -447,11 +424,8 @@ function MessagesContent() {
                 <form onSubmit={handleSendMessage} className="flex gap-2">
                   <Input
                     value={newMessage}
-                    onChange={(e) => {
-                      setNewMessage(e.target.value);
-                      handleTyping();
-                    }}
-                    placeholder="Напишите сообщение..."
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder={isConnected ? "Напишите сообщение..." : "Подключение..."}
                     disabled={isSending || !selectedRoom.isActive}
                     className="flex-1"
                   />

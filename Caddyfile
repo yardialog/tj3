@@ -1,4 +1,15 @@
 :81 {
+	# WebSocket endpoint for chat service - handle trailing slash explicitly
+	@websocket path /ws /ws/*
+	handle @websocket {
+		reverse_proxy localhost:3003 {
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
 	@transform_port_query {
 		query XTransformPort=*
 	}

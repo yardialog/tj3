@@ -7,7 +7,9 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const httpServer = createServer();
+
 const io = new Server(httpServer, {
+  path: '/socket.io',
   cors: {
     origin: ['http://localhost:3000', '*'],
     methods: ['GET', 'POST'],
@@ -143,6 +145,12 @@ io.on('connection', async (socket) => {
       console.error('Error sending message:', error);
       socket.emit('error', { message: 'Ошибка при отправке сообщения' });
     }
+  });
+
+  // Handle manual room join (used by frontend)
+  socket.on('join_room', (data: { roomId: string }) => {
+    socket.join(data.roomId);
+    console.log(`User ${userId} manually joined room ${data.roomId}`);
   });
 
   // Handle typing indicator
