@@ -1,0 +1,452 @@
+// TeenJob Platform - Prisma Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// User & Authentication
+// ============================================
+
+enum UserRole {
+  TEENAGER
+  EMPLOYER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BANNED
+  DELETED
+}
+
+enum VerificationStatus {
+  NOT_UPLOADED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+model User {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  passwordHash  String
+  role          UserRole    @default(TEENAGER)
+  status        UserStatus  @default(ACTIVE)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  lastLoginAt   DateTime?
+  
+  // Profile fields
+  avatarUrl     String?
+  phone         String?
+  
+  // Relations
+  teenager      TeenagerProfile?
+  employer      EmployerProfile?
+  applications  Application[]
+  sentMessages  ChatMessage[]  @relation("SentMessages")
+  receivedMessages ChatMessage[] @relation("ReceivedMessages")
+  reviewsGiven  Review[]       @relation("Reviewer")
+  reviewsReceived Review[]     @relation("Reviewed")
+  reports       Report[]       @relation("Reporter")
+  reportedBy    Report[]       @relation("ReportedUser")
+  notifications Notification[]
+  
+  @@index([email])
+  @@index([role])
+}
+
+model TeenagerProfile {
+  id                String            @id @default(cuid())
+  userId            String            @unique
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Personal info
+  firstName         String
+  lastName          String
+  birthDate         DateTime
+  city              String
+  district          String?
+  bio               String?
+  
+  // Skills as tags (stored as JSON array)
+  skills            String            @default("[]") // JSON array of skill tags
+  
+  // Parent consent
+  hasParentConsent  Boolean           @default(false)
+  consentStatus     VerificationStatus @default(NOT_UPLOADED)
+  consentDocumentUrl String?
+  consentUploadedAt DateTime?
+  consentReviewedAt DateTime?
+  consentReviewNote String?
+  
+  // Stats
+  rating            Float             @default(0)
+  reviewsCount      Int               @default(0)
+  completedJobs     Int               @default(0)
+  
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  
+  @@index([city])
+  @@index([consentStatus])
+}
+
+model EmployerProfile {
+  id                String            @id @default(cuid())
+  userId            String            @unique
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Company info
+  companyName       String
+  inn               String            // Individual Taxpayer Number
+  logoUrl           String?
+  website           String?
+  description       String?
+  city              String
+  address           String?
+  
+  // Verification
+  verificationStatus VerificationStatus @default(NOT_UPLOADED)
+  verifiedAt        DateTime?
+  
+  // Stats
+  rating            Float             @default(0)
+  reviewsCount      Int               @default(0)
+  activeVacanciesCount Int            @default(0)
+  
+  // Relations
+  vacancies         Vacancy[]
+  
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  
+  @@index([inn])
+  @@index([verificationStatus])
+}
+
+// ============================================
+// Vacancies
+// ============================================
+
+enum VacancyCategory {
+  TUTORING      // Репетиторство
+  IT            // IT
+  PROMOTER      // Промоутер
+  DELIVERY      // Доставка
+  CLEANING      // Уборка
+  ANIMATION     // Аниматор
+  SERVICE       // Сфера услуг
+  OTHER         // Другое
+}
+
+enum VacancyStatus {
+  DRAFT
+  ON_MODERATION
+  REJECTED
+  ACTIVE
+  ARCHIVED
+  CLOSED
+}
+
+enum AgeRequirement {
+  AGE_14_15
+  AGE_16_17
+  AGE_14_17
+}
+
+enum WorkSchedule {
+  FULL_TIME
+  PART_TIME
+  FLEXIBLE
+  WEEKENDS
+  EVENING
+  SUMMER
+}
+
+model Vacancy {
+  id              String          @id @default(cuid())
+  employerId      String
+  employer        EmployerProfile @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  
+  // Content
+  title           String
+  slug            String          @unique
+  description     String
+  category        VacancyCategory
+  
+  // Requirements
+  ageRequirement  AgeRequirement  @default(AGE_14_17)
+  requiredSkills  String          @default("[]") // JSON array of skill tags
+  
+  // Compensation
+  salaryMin       Int?
+  salaryMax       Int?
+  salaryFixed     Int?
+  salaryType      String          @default("fixed") // fixed, range, negotiable
+  
+  // Schedule & Location
+  schedule        WorkSchedule    @default(FLEXIBLE)
+  city            String
+  address         String?
+  
+  // Status & Moderation
+  status          VacancyStatus   @default(DRAFT)
+  rejectionReason String?
+  moderatedAt     DateTime?
+  moderatedBy     String?         // Admin user ID
+  
+  // Stats
+  viewsCount      Int             @default(0)
+  applicationsCount Int           @default(0)
+  
+  // Relations
+  applications    Application[]
+  
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  publishedAt     DateTime?
+  expiresAt       DateTime?
+  
+  @@index([category])
+  @@index([status])
+  @@index([city])
+  @@index([ageRequirement])
+  @@index([slug])
+}
+
+// ============================================
+// Applications & Chat
+// ============================================
+
+enum ApplicationStatus {
+  SENT        // Отправлен
+  VIEWED      // Просмотрен
+  ACCEPTED    // Принят
+  REJECTED    // Отклонен
+  COMPLETED   // Завершен
+  CANCELLED   // Отменен
+}
+
+model Application {
+  id            String            @id @default(cuid())
+  vacancyId     String
+  vacancy       Vacancy           @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  teenagerId    String
+  teenager      User              @relation(fields: [teenagerId], references: [id], onDelete: Cascade)
+  
+  // Application content
+  message       String?
+  status        ApplicationStatus @default(SENT)
+  
+  // Status timestamps
+  viewedAt      DateTime?
+  acceptedAt    DateTime?
+  rejectedAt    DateTime?
+  completedAt   DateTime?
+  rejectionReason String?
+  
+  // Chat room
+  chatRoom      ChatRoom?
+  
+  // Review (after completion)
+  review        Review?
+  
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  
+  @@unique([vacancyId, teenagerId])
+  @@index([status])
+}
+
+model ChatRoom {
+  id              String        @id @default(cuid())
+  applicationId   String        @unique
+  application     Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  // Participants
+  teenagerId      String
+  employerId      String
+  
+  // Messages
+  messages        ChatMessage[]
+  
+  // Status
+  isActive        Boolean       @default(true)
+  closedAt        DateTime?
+  closedBy        String?
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([teenagerId])
+  @@index([employerId])
+}
+
+model ChatMessage {
+  id          String      @id @default(cuid())
+  roomId      String
+  room        ChatRoom    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  
+  senderId    String
+  sender      User        @relation("SentMessages", fields: [senderId], references: [id])
+  receiverId  String
+  receiver    User        @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  
+  content     String
+  isRead      Boolean     @default(false)
+  readAt      DateTime?
+  
+  // Flags
+  isSystem    Boolean     @default(false)
+  hasContact  Boolean     @default(false) // Message contains contact info
+  
+  createdAt   DateTime    @default(now())
+  
+  @@index([roomId])
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+// ============================================
+// Reviews & Ratings
+// ============================================
+
+model Review {
+  id            String    @id @default(cuid())
+  
+  // Who is reviewing whom
+  reviewerId    String
+  reviewer      User      @relation("Reviewer", fields: [reviewerId], references: [id])
+  reviewedId    String
+  reviewed      User      @relation("Reviewed", fields: [reviewedId], references: [id])
+  
+  // Related application
+  applicationId String    @unique
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  // Review content
+  rating        Int       // 1-5 stars
+  comment       String?
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([reviewerId])
+  @@index([reviewedId])
+  @@index([rating])
+}
+
+// ============================================
+// Moderation & Reports
+// ============================================
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportType {
+  INAPPROPRIATE_CONTENT
+  SPAM
+  FRAUD
+  HARASSMENT
+  OTHER
+}
+
+model Report {
+  id            String        @id @default(cuid())
+  
+  reporterId    String
+  reporter      User          @relation("Reporter", fields: [reporterId], references: [id])
+  reportedId    String
+  reportedUser  User          @relation("ReportedUser", fields: [reportedId], references: [id])
+  
+  type          ReportType
+  description   String
+  
+  // Context
+  vacancyId     String?
+  messageId     String?
+  
+  status        ReportStatus  @default(PENDING)
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  resolution    String?
+  
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  @@index([status])
+}
+
+// ============================================
+// Notifications
+// ============================================
+
+enum NotificationType {
+  APPLICATION_SENT
+  APPLICATION_VIEWED
+  APPLICATION_ACCEPTED
+  APPLICATION_REJECTED
+  NEW_MESSAGE
+  NEW_REVIEW
+  VACANCY_PUBLISHED
+  VACANCY_REJECTED
+  SYSTEM
+}
+
+model Notification {
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        NotificationType
+  title       String
+  content     String
+  
+  // Link to related entity
+  linkUrl     String?
+  
+  isRead      Boolean           @default(false)
+  readAt      DateTime?
+  
+  createdAt   DateTime          @default(now())
+  
+  @@index([userId])
+  @@index([isRead])
+}
+
+// ============================================
+// System & Settings
+// ============================================
+
+model BannedWord {
+  id        String    @id @default(cuid())
+  word      String    @unique
+  category  String?   // profanity, spam, etc.
+  createdAt DateTime  @default(now())
+  
+  @@index([word])
+}
+
+model SystemSetting {
+  id        String    @id @default(cuid())
+  key       String    @unique
+  value     String
+  updatedAt DateTime  @updatedAt
+  
+  @@index([key])
+}
