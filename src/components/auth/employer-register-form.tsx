@@ -84,6 +84,7 @@ export function EmployerRegisterForm({ onRegisteringChange }: EmployerRegisterFo
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           ...data,
           role: 'EMPLOYER',
@@ -111,7 +112,8 @@ export function EmployerRegisterForm({ onRegisteringChange }: EmployerRegisterFo
     setShowSuccessModal(open);
     if (!open) {
       onRegisteringChange?.(false);
-      router.push('/dashboard/employer');
+      // Используем window.location для полной перезагрузки страницы
+      window.location.href = '/dashboard/employer';
     }
   };
 

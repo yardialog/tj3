@@ -29,9 +29,9 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  isLoading: false, // Не показываем спиннер при начальной загрузке
+  isLoading: false,
   isAuthenticated: false,
-  hasInitiallyLoaded: false, // Флаг для отслеживания первой загрузки
+  hasInitiallyLoaded: false,
 
   setUser: (user) => set({
     user,
@@ -43,7 +43,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -58,10 +61,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
+        credentials: 'include',
       });
 
       if (response.ok) {
-        const data = await response.json();
         return true;
       } else {
         set({
@@ -83,18 +86,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   authenticatedFetch: async (url: string, options: RequestInit = {}) => {
-    // First attempt
     let response = await fetch(url, {
       ...options,
       credentials: 'include',
     });
 
-    // If unauthorized, try to refresh token and retry
     if (response.status === 401) {
       const refreshed = await get().refreshToken();
 
       if (refreshed) {
-        // Retry the original request
         response = await fetch(url, {
           ...options,
           credentials: 'include',
@@ -106,14 +106,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   fetchUser: async () => {
-    // Устанавливаем isLoading только если это не первая загрузка
     const shouldShowLoading = get().hasInitiallyLoaded;
     if (shouldShowLoading) {
       set({ isLoading: true });
     }
-    
+
     try {
-      const response = await fetch('/api/auth/me');
+      const response = await fetch('/api/auth/me', {
+        credentials: 'include',
+      });
 
       if (response.ok) {
         const data = await response.json();
@@ -127,11 +128,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // Try to refresh token
         const refreshResponse = await fetch('/api/auth/refresh', {
           method: 'POST',
+          credentials: 'include',
         });
 
         if (refreshResponse.ok) {
           // Retry fetching user
-          const retryResponse = await fetch('/api/auth/me');
+          const retryResponse = await fetch('/api/auth/me', {
+            credentials: 'include',
+          });
           if (retryResponse.ok) {
             const data = await retryResponse.json();
             set({

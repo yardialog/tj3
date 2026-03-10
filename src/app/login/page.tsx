@@ -55,6 +55,7 @@ function LoginPageContent() {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(data),
       });
 
@@ -66,8 +67,8 @@ function LoginPageContent() {
 
       setUser(result.user);
       toast.success('Добро пожаловать!');
-      // Redirect based on role
-      router.push(result.user.role === 'EMPLOYER' ? '/dashboard/employer' : '/dashboard');
+      // Используем window.location для полной перезагрузки страницы
+      window.location.href = result.user.role === 'EMPLOYER' ? '/dashboard/employer' : '/dashboard';
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Ошибка входа');
     } finally {

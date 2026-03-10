@@ -166,6 +166,7 @@ export function TeenagerRegisterForm({ onRegisteringChange }: TeenagerRegisterFo
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           ...data,
           role: 'TEENAGER',
@@ -193,7 +194,8 @@ export function TeenagerRegisterForm({ onRegisteringChange }: TeenagerRegisterFo
     setShowSuccessModal(open);
     if (!open) {
       onRegisteringChange?.(false);
-      router.push('/dashboard');
+      // Используем window.location для полной перезагрузки страницы
+      window.location.href = '/dashboard';
     }
   };
 
