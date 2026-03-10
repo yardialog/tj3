@@ -41,7 +41,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -56,6 +59,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
+        credentials: 'include',
       });
 
       if (response.ok) {
@@ -106,7 +110,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   fetchUser: async () => {
     set({ isLoading: true });
     try {
-      const response = await fetch('/api/auth/me');
+      const response = await fetch('/api/auth/me', {
+        credentials: 'include',
+      });
 
       if (response.ok) {
         const data = await response.json();
@@ -119,11 +125,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // Try to refresh token
         const refreshResponse = await fetch('/api/auth/refresh', {
           method: 'POST',
+          credentials: 'include',
         });
 
         if (refreshResponse.ok) {
           // Retry fetching user
-          const retryResponse = await fetch('/api/auth/me');
+          const retryResponse = await fetch('/api/auth/me', {
+            credentials: 'include',
+          });
           if (retryResponse.ok) {
             const data = await retryResponse.json();
             set({
